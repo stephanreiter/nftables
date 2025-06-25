@@ -44,6 +44,21 @@ func (cc *Conn) AddObject(o Obj) Obj {
 // AddObj adds the specified Obj. See also
 // https://wiki.nftables.org/wiki-nftables/index.php/Stateful_objects
 func (cc *Conn) AddObj(o Obj) Obj {
+	return cc.addObj(o, false)
+}
+
+// ReplaceObject replaces the specified Obj. Alias of ReplaceObj.
+func (cc *Conn) ReplaceObject(o Obj) Obj {
+	return cc.ReplaceObj(o)
+}
+
+// ReplaceObj replaces the specified Obj. See also
+// https://wiki.nftables.org/wiki-nftables/index.php/Stateful_objects
+func (cc *Conn) ReplaceObj(o Obj) Obj {
+	return cc.addObj(o, true)
+}
+
+func (cc *Conn) addObj(o Obj, replace bool) Obj {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
 	data, err := o.marshal(true)
@@ -52,10 +67,16 @@ func (cc *Conn) AddObj(o Obj) Obj {
 		return nil
 	}
 
+	flags := netlink.Request | netlink.Acknowledge
+	if replace {
+		flags |= netlink.Replace
+	} else {
+		flags |= netlink.Create
+	}
 	cc.messages = append(cc.messages, netlink.Message{
 		Header: netlink.Header{
 			Type:  netlink.HeaderType((unix.NFNL_SUBSYS_NFTABLES << 8) | unix.NFT_MSG_NEWOBJ),
-			Flags: netlink.Request | netlink.Acknowledge | netlink.Create,
+			Flags: flags,
 		},
 		Data: append(extraHeader(uint8(o.family()), 0), data...),
 	})

@@ -1096,6 +1096,68 @@ func TestDeleteCounter(t *testing.T) {
 	}
 }
 
+func TestReplaceCounter(t *testing.T) {
+	// The want byte sequences come from stracing nft(8), e.g.:
+	// strace -f -v -x -s 2048 -eraw=sendto nft add table ip nat
+	//
+	// The nft(8) command sequence was taken from:
+	// https://wiki.nftables.org/wiki-nftables/index.php/Performing_Network_Address_Translation_(NAT)
+	want := [][]byte{
+		// batch begin
+		[]byte("\x00\x00\x00\x0a"),
+		// nft add counter ip filter fwded
+		[]byte("\x02\x00\x00\x00\x0b\x00\x01\x00\x66\x69\x6c\x74\x65\x72\x00\x00\x0a\x00\x02\x00\x66\x77\x64\x65\x64\x00\x00\x00\x08\x00\x03\x00\x00\x00\x00\x01\x1c\x00\x04\x80\x0c\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0c\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00"),
+		// nft replace counter ip filter fwded
+		[]byte("\x02\x00\x00\x00\x0b\x00\x01\x00\x66\x69\x6c\x74\x65\x72\x00\x00\x0a\x00\x02\x00\x66\x77\x64\x65\x64\x00\x00\x00\x08\x00\x03\x00\x00\x00\x00\x01\x1c\x00\x04\x80\x0c\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x40\x0c\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00\x01"),
+		// batch end
+		[]byte("\x00\x00\x00\x0a"),
+	}
+
+	c, err := nftables.New(nftables.WithTestDial(
+		func(req []netlink.Message) ([]netlink.Message, error) {
+			for idx, msg := range req {
+				b, err := msg.MarshalBinary()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(b) < 16 {
+					continue
+				}
+				b = b[16:]
+				if len(want) == 0 {
+					t.Errorf("no want entry for message %d: %x", idx, b)
+					continue
+				}
+				if got, want := b, want[0]; !bytes.Equal(got, want) {
+					t.Errorf("message %d: %s", idx, linediff(nfdump(got), nfdump(want)))
+				}
+				want = want[1:]
+			}
+			return req, nil
+		}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c.AddObj(&nftables.CounterObj{
+		Table:   &nftables.Table{Name: "filter", Family: nftables.TableFamilyIPv4},
+		Name:    "fwded",
+		Bytes:   0,
+		Packets: 0,
+	})
+
+	c.ReplaceObject(&nftables.CounterObj{
+		Table:   &nftables.Table{Name: "filter", Family: nftables.TableFamilyIPv4},
+		Name:    "fwded",
+		Bytes:   64,
+		Packets: 1,
+	})
+
+	if err := c.Flush(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDelRule(t *testing.T) {
 	want := [][]byte{
 		// batch begin
